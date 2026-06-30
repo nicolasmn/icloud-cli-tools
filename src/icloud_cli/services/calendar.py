@@ -10,6 +10,7 @@ from typing import Any
 
 from dateutil import parser as dateutil_parser
 from pyicloud import PyiCloudService
+from pyicloud.services.calendar import EventObject
 
 from icloud_cli.config import Config
 
@@ -53,6 +54,13 @@ def _format_datetime(dt: Any) -> str:
             return datetime.fromtimestamp(dt / 1000).strftime("%Y-%m-%d %H:%M")
         except (ValueError, OSError):
             return str(dt)
+    if isinstance(dt, (list, tuple)) and len(dt) >= 6:
+        # iCloud date format: [YYYYMMDD, year, month, day, hour, minute, ...]
+        try:
+            year, month, day, hour, minute = int(dt[1]), int(dt[2]), int(dt[3]), int(dt[4]), int(dt[5])
+            return datetime(year, month, day, hour, minute).strftime("%Y-%m-%d %H:%M")
+        except (ValueError, IndexError, TypeError):
+            return str(dt)
     return str(dt)
 
 
@@ -80,7 +88,7 @@ class CalendarService:
         end = _parse_date(to_date, default=start + timedelta(days=7))
 
         try:
-            events = self.api.calendar.events(from_dt=start, to_dt=end)
+            events = self.api.calendar.get_events(from_dt=start, to_dt=end)
         except Exception as e:
             from icloud_cli.output import error
             error(f"Failed to fetch events: {e}")
@@ -120,7 +128,7 @@ class CalendarService:
         end = now + timedelta(days=365)
 
         try:
-            events = self.api.calendar.events(from_dt=start, to_dt=end)
+            events = self.api.calendar.get_events(from_dt=start, to_dt=end)
         except Exception:
             return None
 
@@ -175,19 +183,19 @@ class CalendarService:
             return False
 
         try:
-            # Build event payload
-            event_data = {
-                "title": title,
-                "startDate": _datetime_to_icloud(start_dt),
-                "endDate": _datetime_to_icloud(end_dt),
-            }
+            # Resolve calendar GUID
+            pguid = self._resolve_calendar_guid(calendar_name)
 
-            if location:
-                event_data["location"] = location
-            if description:
-                event_data["description"] = description
+            # Build EventObject
+            event = EventObject(
+                pguid=pguid,
+                title=title,
+                start_date=start_dt,
+                end_date=end_dt,
+                location=location or "",
+            )
 
-            self.api.calendar.create_event(**event_data)
+            self.api.calendar.add_event(event)
             return True
         except Exception as e:
             from icloud_cli.output import error
@@ -204,14 +212,54 @@ class CalendarService:
             True if event was deleted successfully.
         """
         try:
-            self.api.calendar.delete_event(event_id)
+            # Find the event to get its pguid (calendar GUID)
+            event_detail = self.get_event(event_id)
+            if not event_detail:
+                from icloud_cli.output import error
+                error(f"Event not found: {event_id}")
+                return False
+
+            pguid = event_detail.get("calendar", "")
+            event = EventObject(
+                pguid=pguid,
+                title=event_detail.get("title", ""),
+                guid=event_id,
+            )
+
+            self.api.calendar.remove_event(event)
             return True
         except Exception as e:
             from icloud_cli.output import error
             error(f"Failed to delete event: {e}")
             return False
 
+    def _resolve_calendar_guid(self, calendar_name: str | None) -> str:
+        """Resolve a calendar name to its GUID. Uses default calendar if None or not found.
 
-def _datetime_to_icloud(dt: datetime) -> list[int]:
-    """Convert a datetime to iCloud's date format [year, month, day, hour, minute]."""
-    return [dt.year, dt.month, dt.day, dt.hour, dt.minute]
+        Args:
+            calendar_name: Name of the calendar, or None for default.
+
+        Returns:
+            The calendar GUID.
+        """
+        calendars = self.api.calendar.get_calendars()
+        if not calendars:
+            return ""
+
+        # If no name specified, use the first calendar (default)
+        if not calendar_name:
+            for cal in calendars:
+                if cal.get("isDefault"):
+                    return cal.get("guid", "")
+            return calendars[0].get("guid", "") if calendars else ""
+
+        # Find by name
+        for cal in calendars:
+            if cal.get("title", "") == calendar_name:
+                return cal.get("guid", "")
+
+        # Not found — fall back to default
+        for cal in calendars:
+            if cal.get("isDefault"):
+                return cal.get("guid", "")
+        return calendars[0].get("guid", "") if calendars else ""
