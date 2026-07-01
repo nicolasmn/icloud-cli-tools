@@ -8,11 +8,30 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
+from dataclasses import dataclass
+
 from dateutil import parser as dateutil_parser
 from pyicloud import PyiCloudService
-from pyicloud.services.calendar import EventObject
+from pyicloud.services.calendar import AppleCalendarEvent, EventObject
 
 from icloud_cli.config import Config
+
+
+@dataclass
+class DescribedEventObject(EventObject):
+    """EventObject subclass that supports description.
+
+    pyicloud's EventObject doesn't expose description, even though
+    AppleCalendarEvent has the field. We override to_apple_event to
+    inject it so it flows through request_data → asdict → API.
+    """
+
+    description: str = ""
+
+    def to_apple_event(self) -> AppleCalendarEvent:
+        event = super().to_apple_event()
+        event.description = self.description
+        return event
 
 
 def _parse_date(date_str: str | None, default: datetime | None = None) -> datetime | None:
@@ -187,12 +206,13 @@ class CalendarService:
             pguid = self._resolve_calendar_guid(calendar_name)
 
             # Build EventObject
-            event = EventObject(
+            event = DescribedEventObject(
                 pguid=pguid,
                 title=title,
                 start_date=start_dt,
                 end_date=end_dt,
                 location=location or "",
+                description=description or "",
             )
 
             self.api.calendar.add_event(event)
@@ -209,6 +229,7 @@ class CalendarService:
         start: str | None = None,
         end: str | None = None,
         location: str | None = None,
+        description: str | None = None,
     ) -> bool:
         """Update an existing calendar event.
 
@@ -222,6 +243,7 @@ class CalendarService:
             start: New start datetime string (optional).
             end: New end datetime string (optional).
             location: New location (optional).
+            description: New description (optional).
 
         Returns:
             True if event was updated successfully.
@@ -265,6 +287,10 @@ class CalendarService:
             new_location = (
                 location if location is not None else current.get("location", "")
             )
+            new_description = (
+                description if description is not None
+                else current.get("description", "")
+            )
 
             if start is not None:
                 parsed_start = _parse_date(start)
@@ -288,12 +314,13 @@ class CalendarService:
                 return False
 
             # Build EventObject with the SAME guid — triggers update, not create
-            event = EventObject(
+            event = DescribedEventObject(
                 pguid=pguid,
                 title=new_title,
                 start_date=start_dt,
                 end_date=end_dt,
                 location=new_location,
+                description=new_description,
                 guid=event_id,
             )
 

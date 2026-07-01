@@ -139,7 +139,7 @@ def calendar_show(ctx: AppContext, event_id: str):
 @click.option("--end", "-e", required=True, help="End datetime (YYYY-MM-DD HH:MM).")
 @click.option("--calendar", "-c", "calendar_name", default=None, help="Calendar name.")
 @click.option("--location", "-l", default=None, help="Event location.")
-@click.option("--notes", "-n", default=None, help="Event notes/description.")
+@click.option("--description", "-d", default=None, help="Event description/notes.")
 @pass_context
 def calendar_add(
     ctx: AppContext,
@@ -148,7 +148,7 @@ def calendar_add(
     end: str,
     calendar_name: str | None,
     location: str | None,
-    notes: str | None,
+    description: str | None,
 ):
     """Add a new calendar event."""
     from icloud_cli.services.calendar import CalendarService
@@ -160,7 +160,7 @@ def calendar_add(
         end=end,
         calendar_name=calendar_name,
         location=location,
-        description=notes,
+        description=description,
     )
     if result:
         success(f"Event '{title}' created.")
@@ -174,6 +174,7 @@ def calendar_add(
 @click.option("--start", "-s", default=None, help="New start datetime (YYYY-MM-DD HH:MM).")
 @click.option("--end", "-e", default=None, help="New end datetime (YYYY-MM-DD HH:MM).")
 @click.option("--location", "-l", default=None, help="New event location.")
+@click.option("--description", "-d", default=None, help="New event description.")
 @pass_context
 def calendar_edit(
     ctx: AppContext,
@@ -182,6 +183,7 @@ def calendar_edit(
     start: str | None,
     end: str | None,
     location: str | None,
+    description: str | None,
 ):
     """Edit an existing calendar event.
 
@@ -197,6 +199,7 @@ def calendar_edit(
         start=start,
         end=end,
         location=location,
+        description=description,
     )
     if result:
         success(f"Event '{event_id}' updated.")
