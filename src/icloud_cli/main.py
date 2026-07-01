@@ -168,6 +168,42 @@ def calendar_add(
         error("Failed to create event.")
 
 
+@calendar.command("edit")
+@click.argument("event_id")
+@click.option("--title", "-t", default=None, help="New event title.")
+@click.option("--start", "-s", default=None, help="New start datetime (YYYY-MM-DD HH:MM).")
+@click.option("--end", "-e", default=None, help="New end datetime (YYYY-MM-DD HH:MM).")
+@click.option("--location", "-l", default=None, help="New event location.")
+@pass_context
+def calendar_edit(
+    ctx: AppContext,
+    event_id: str,
+    title: str | None,
+    start: str | None,
+    end: str | None,
+    location: str | None,
+):
+    """Edit an existing calendar event.
+
+    Only fields that are provided are changed; the rest keep their current
+    values. EVENT_ID is the event GUID (shown by 'calendar list' as 'id').
+    """
+    from icloud_cli.services.calendar import CalendarService
+
+    service = CalendarService(ctx.auth.api, ctx.config)
+    result = service.update_event(
+        event_id=event_id,
+        title=title,
+        start=start,
+        end=end,
+        location=location,
+    )
+    if result:
+        success(f"Event '{event_id}' updated.")
+    else:
+        error(f"Failed to update event '{event_id}'.")
+
+
 @calendar.command("delete")
 @click.argument("event_id")
 @pass_context

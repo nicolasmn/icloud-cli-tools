@@ -202,6 +202,108 @@ class CalendarService:
             error(f"Failed to create event: {e}")
             return False
 
+    def update_event(
+        self,
+        event_id: str,
+        title: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        location: str | None = None,
+    ) -> bool:
+        """Update an existing calendar event.
+
+        Only fields that are provided (not None) are changed; the rest keep
+        their current values. Editing works by re-POSTing an EventObject with
+        the same guid — Apple's CalDAV-style API treats this as an update.
+
+        Args:
+            event_id: The event GUID.
+            title: New title (optional).
+            start: New start datetime string (optional).
+            end: New end datetime string (optional).
+            location: New location (optional).
+
+        Returns:
+            True if event was updated successfully.
+        """
+        try:
+            # Find the event to get its pguid and current values
+            current = self.get_event(event_id)
+            if not current:
+                from icloud_cli.output import error
+                error(f"Event not found: {event_id}")
+                return False
+
+            pguid = current.get("calendar", "")
+
+            # Fetch raw event detail to get precise start/end datetimes
+            # (get_event returns formatted strings, not datetime objects)
+            detail = self.api.calendar.get_event_detail(pguid, event_id, as_obj=False)
+
+            # Parse existing start/end from Apple's date list format
+            def _parse_apple_date(ad: Any) -> datetime | None:
+                if isinstance(ad, (list, tuple)) and len(ad) >= 6:
+                    try:
+                        return datetime(
+                            int(ad[1]), int(ad[2]), int(ad[3]),
+                            int(ad[4]), int(ad[5]),
+                        )
+                    except (ValueError, IndexError, TypeError):
+                        return None
+                return None
+
+            start_dt = _parse_apple_date(detail.get("startDate"))
+            end_dt = _parse_apple_date(detail.get("endDate"))
+
+            if not start_dt or not end_dt:
+                from icloud_cli.output import error
+                error(f"Could not parse existing event dates for: {event_id}")
+                return False
+
+            # Apply overrides
+            new_title = title if title is not None else current.get("title", "Untitled")
+            new_location = (
+                location if location is not None else current.get("location", "")
+            )
+
+            if start is not None:
+                parsed_start = _parse_date(start)
+                if not parsed_start:
+                    from icloud_cli.output import error
+                    error(f"Invalid start date format: {start}")
+                    return False
+                start_dt = parsed_start
+
+            if end is not None:
+                parsed_end = _parse_date(end)
+                if not parsed_end:
+                    from icloud_cli.output import error
+                    error(f"Invalid end date format: {end}")
+                    return False
+                end_dt = parsed_end
+
+            if start_dt >= end_dt:
+                from icloud_cli.output import error
+                error("Start date must be before end date.")
+                return False
+
+            # Build EventObject with the SAME guid — triggers update, not create
+            event = EventObject(
+                pguid=pguid,
+                title=new_title,
+                start_date=start_dt,
+                end_date=end_dt,
+                location=new_location,
+                guid=event_id,
+            )
+
+            self.api.calendar.add_event(event)
+            return True
+        except Exception as e:
+            from icloud_cli.output import error
+            error(f"Failed to update event: {e}")
+            return False
+
     def delete_event(self, event_id: str) -> bool:
         """Delete a calendar event by ID.
 
