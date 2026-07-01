@@ -126,6 +126,7 @@ class CalendarService:
                 ),
                 "calendar": event.get("pGuid", ""),
                 "location": event.get("location", ""),
+                "organizer": event.get("organizer", ""),
                 "all_day": event.get("allDay", False),
             })
 
@@ -165,11 +166,38 @@ class CalendarService:
                     "calendar": event.get("pGuid", ""),
                     "location": event.get("location", ""),
                     "description": event.get("description", ""),
+                    "organizer": event.get("organizer", ""),
                     "all_day": event.get("allDay", False),
                     "url": event.get("url", ""),
                 }
 
         return None
+
+    def get_event_detail(self, event_id: str) -> dict[str, Any] | None:
+        """Get the raw event detail dict from Apple's API.
+
+        Unlike get_event (which returns formatted strings), this returns
+        the raw event dict with Apple's native date list format and all
+        fields (organizer, invitees, etag, etc.).
+
+        Args:
+            event_id: The event GUID.
+
+        Returns:
+            Raw event dict or None if not found.
+        """
+        current = self.get_event(event_id)
+        if not current:
+            return None
+
+        pguid = current.get("calendar", "")
+        if not pguid:
+            return None
+
+        try:
+            return self.api.calendar.get_event_detail(pguid, event_id, as_obj=False)
+        except Exception:
+            return None
 
     def add_event(
         self,
@@ -258,9 +286,12 @@ class CalendarService:
 
             pguid = current.get("calendar", "")
 
-            # Fetch raw event detail to get precise start/end datetimes
-            # (get_event returns formatted strings, not datetime objects)
-            detail = self.api.calendar.get_event_detail(pguid, event_id, as_obj=False)
+            # Fetch raw event detail via service layer (not raw pyicloud API)
+            detail = self.get_event_detail(event_id)
+            if not detail:
+                from icloud_cli.output import error
+                error(f"Could not fetch event detail for: {event_id}")
+                return False
 
             # Parse existing start/end from Apple's date list format
             def _parse_apple_date(ad: Any) -> datetime | None:
